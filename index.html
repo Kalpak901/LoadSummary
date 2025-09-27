@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Structural Load Data Uploader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
+        .card { box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1); }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <!-- Main Container -->
+    <div class="card w-full max-w-lg bg-white p-8 rounded-xl border border-gray-200">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">IS Code Load Bot Trigger</h1>
+        <p class="text-gray-600 mb-6">Upload your building characteristic spreadsheet (CSV/text) to run the structural analysis.</p>
+
+        <!-- File Input Form -->
+        <form id="uploadForm" class="space-y-6">
+            <div>
+                <label for="data_file" class="block text-sm font-medium text-gray-700 mb-2">Upload Data File (.csv or .txt)</label>
+                <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                    <div class="space-y-1 text-center">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3-3m0 0l-3 3m3-3v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <div class="flex text-sm text-gray-600">
+                            <label for="file-upload" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
+                                <span>Upload a file</span>
+                                <input id="file-upload" name="file-upload" type="file" class="sr-only" accept=".csv, .txt">
+                            </label>
+                            <p class="pl-1">or drag and drop</p>
+                        </div>
+                        <p class="text-xs text-gray-500" id="fileName">No file selected.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" id="submitButton" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-lg font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out disabled:opacity-50" disabled>
+                <span id="buttonText">Analyze Load Characteristics</span>
+                <div id="spinner" class="hidden h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin ml-2"></div>
+            </button>
+        </form>
+
+        <!-- Status Message Box -->
+        <div id="statusMessage" class="mt-6 p-4 rounded-lg text-sm hidden"></div>
+    </div>
+
+    <script>
+        // CRITICAL: Replace this placeholder with the URL of your activated n8n Webhook node
+        const N8N_WEBHOOK_URL = 'YOUR_N8N_WEBHOOK_URL_HERE'; 
+
+        const uploadForm = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('file-upload');
+        const submitButton = document.getElementById('submitButton');
+        const fileNameDisplay = document.getElementById('fileName');
+        const statusMessage = document.getElementById('statusMessage');
+        const buttonText = document.getElementById('buttonText');
+        const spinner = document.getElementById('spinner');
+
+        // Enable button when a file is selected
+        fileInput.addEventListener('change', (event) => {
+            if (event.target.files.length > 0) {
+                fileNameDisplay.textContent = event.target.files[0].name;
+                submitButton.disabled = false;
+            } else {
+                fileNameDisplay.textContent = 'No file selected.';
+                submitButton.disabled = true;
+            }
+            statusMessage.classList.add('hidden');
+        });
+
+        // Handle Form Submission
+        uploadForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // UI feedback
+            submitButton.disabled = true;
+            buttonText.textContent = 'Processing...';
+            spinner.classList.remove('hidden');
+            statusMessage.classList.add('hidden');
+            statusMessage.textContent = '';
+            
+            const reader = new FileReader();
+
+            reader.onload = async (event) => {
+                const fileContent = event.target.result;
+                
+                try {
+                    const response = await fetch(N8N_WEBHOOK_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        // Send the file content as a single text string inside a JSON body
+                        body: JSON.stringify({ spreadsheetData: fileContent }),
+                    });
+
+                    // Check for successful trigger (n8n Webhook typically returns 200 or 202)
+                    if (response.ok) {
+                        showStatus('success', '✅ Workflow triggered successfully! Check your n8n execution log for the final report.');
+                    } else {
+                        const errorText = await response.text();
+                        showStatus('error', `❌ Failed to trigger n8n workflow. Status: ${response.status}. Response: ${errorText.substring(0, 100)}...`);
+                    }
+
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    showStatus('error', `🛑 Network or API error occurred: ${error.message}. Check your Webhook URL.`);
+                } finally {
+                    // Reset UI
+                    submitButton.disabled = false;
+                    buttonText.textContent = 'Analyze Load Characteristics';
+                    spinner.classList.add('hidden');
+                }
+            };
+
+            reader.onerror = (error) => {
+                console.error('File reading error:', error);
+                showStatus('error', '❌ Error reading the uploaded file.');
+                submitButton.disabled = false;
+                buttonText.textContent = 'Analyze Load Characteristics';
+                spinner.classList.add('hidden');
+            };
+
+            // Read the file content as plain text
+            reader.readAsText(file);
+        });
+
+        function showStatus(type, message) {
+            statusMessage.textContent = message;
+            statusMessage.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800');
+            
+            if (type === 'success') {
+                statusMessage.classList.add('bg-green-100', 'text-green-800');
+            } else if (type === 'error') {
+                statusMessage.classList.add('bg-red-100', 'text-red-800');
+            }
+        }
+    </script>
+
+</body>
+</html>
